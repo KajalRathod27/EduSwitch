@@ -1587,12 +1587,541 @@
 #             ]
 
 
+# from __future__ import annotations
+
+# import os
+# import json
+# import torch
+# import numpy as np
+# from typing import List, Dict, Any, cast
+
+# torch.set_num_threads(1)
+
+# import chromadb
+# from chromadb import Collection
+# from sentence_transformers import SentenceTransformer
+# from rank_bm25 import BM25Okapi
+# from groq import Groq
+
+
+# class SwitchSmartRAG:
+
+#     def __init__(self) -> None:
+#         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+#         self.client: Any = chromadb.PersistentClient(path=os.path.join(BASE_DIR, "chroma_db"))
+#         self.collection: Collection = self.client.get_collection("college_collection")
+#         print("✅ ChromaDB connected")
+
+#         self.embed_model: SentenceTransformer = SentenceTransformer(
+#             "all-MiniLM-L6-v2", device="cpu"
+#         )
+#         print("✅ Embedding model loaded")
+
+#         self.groq_client: Groq = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
+
+#         raw_data: Dict[str, Any] = cast(Dict[str, Any], self.collection.get())
+#         metadatas_raw: Any = raw_data.get("metadatas") or []
+#         self.metadata: List[Dict[str, Any]] = [
+#             dict(m) for m in metadatas_raw if isinstance(m, dict)
+#         ]
+#         print(f"✅ Loaded {len(self.metadata)} college records")
+
+#         corpus: List[str] = [
+#             " ".join([
+#                 str(m.get("college_name", "")),
+#                 str(m.get("course", "")),
+#                 str(m.get("city", "")),
+#                 str(m.get("facilities", "")),
+#             ])
+#             for m in self.metadata
+#         ]
+#         tokenized: List[List[str]] = [doc.lower().split() for doc in corpus]
+#         self.bm25: BM25Okapi = BM25Okapi(tokenized)
+#         print("✅ BM25 index built — RAG ready")
+
+#     def retrieve(
+#         self,
+#         query: str,
+#         city: str = "",
+#         stream: str = "",
+#         n: int = 10,
+#     ) -> List[Dict[str, Any]]:
+
+#         if not query.strip():
+#             query = "college"
+
+#         embedding: List[float] = self.embed_model.encode(
+#             query, convert_to_numpy=True
+#         ).tolist()
+
+#         n_results = max(1, min(n, len(self.metadata)))
+
+#         query_result: Dict[str, Any] = cast(
+#             Dict[str, Any],
+#             self.collection.query(
+#                 query_embeddings=[embedding],
+#                 n_results=n_results,
+#             )
+#         )
+
+#         metadatas_field: Any = query_result.get("metadatas") or [[]]
+#         semantic_results: List[Dict[str, Any]] = [
+#             dict(m)
+#             for m in (metadatas_field[0] if metadatas_field else [])
+#             if isinstance(m, dict)
+#         ]
+
+#         scores: np.ndarray = self.bm25.get_scores(query.lower().split())
+#         top_idx = np.argsort(scores)[::-1][:n]
+#         keyword_results: List[Dict[str, Any]] = [
+#             self.metadata[int(i)] for i in top_idx
+#         ]
+
+#         combined = semantic_results + keyword_results
+
+#         unique: Dict[str, Dict[str, Any]] = {}
+#         for idx, c in enumerate(combined):
+#             key = str(c.get("college_name", str(idx)))
+#             if key not in unique:
+#                 unique[key] = c
+
+#         filtered: List[Dict[str, Any]] = []
+
+#         for c in unique.values():
+#             c_city = str(c.get("city", "")).lower()
+#             c_course = str(c.get("course", "")).lower()
+
+#             if city and city.lower() not in c_city:
+#                 continue
+
+#             if stream and stream.lower() not in c_course:
+#                 continue
+
+#             filtered.append(c)
+
+#         filtered.sort(key=lambda c: (
+#             city.lower() not in str(c.get("city", "")).lower() if city else False,
+#             stream.lower() not in str(c.get("course", "")).lower() if stream else False
+#         ))
+
+#         return filtered[:n]
+
+#     def generate_response(
+#         self,
+#         query: str,
+#         colleges: List[Dict[str, Any]],
+#     ) -> str:
+
+#         if colleges:
+#             college_lines = [
+#                 f"• {c.get('college_name')} | {c.get('course')} | "
+#                 f"{c.get('city')} | {c.get('ownership', '')}\n"
+#                 f"  Facilities: {c.get('facilities', '')}"
+#                 for c in colleges[:5]
+#             ]
+#             context = "\n".join(college_lines)
+#         else:
+#             context = "No specific colleges found in database."
+
+#         prompt = (
+#             "You are EduSwitch, an expert Indian academic and career advisor.\n\n"
+#             f"Student question: {query}\n\n"
+#             f"Colleges from our database:\n{context}\n\n"
+#             "Give a detailed structured response with ALL these sections:\n\n"
+#             "1. **Career Switch Advice**\n"
+#             "   - Is this switch feasible?\n"
+#             "   - Pros and cons of this transition\n\n"
+#             "2. **Skills Required**\n"
+#             "   - List 5-8 key technical and soft skills needed for this career switch\n"
+#             "   - Rate each skill importance: High / Medium / Low\n\n"
+#             "3. **Bridge Courses**\n"
+#             "   - List 3-5 bridge courses or certifications to fill knowledge gaps\n"
+#             "   - Mention if available online or offline\n"
+#             "   - Approximate duration of each\n\n"
+#             "4. **Steps to Switch**\n"
+#             "   - Concrete 4-5 step action plan with timeline\n\n"
+#             "5. **Top College Recommendations**\n"
+#             "   - Recommend 3 colleges from the database above with specific reasons\n"
+#             "   - Mention course, city, and why it suits this student\n\n"
+#             "6. **Timeline**\n"
+#             "   - Realistic month-by-month timeline for the full transition\n\n"
+#             "Be specific, practical, and encouraging. Focus on Indian education system."
+#         )
+
+#         try:
+#             completion = self.groq_client.chat.completions.create(
+#                 model="llama-3.1-8b-instant",
+#                 messages=[{"role": "user", "content": prompt}],
+#                 max_tokens=1500,
+#             )
+#             return str(completion.choices[0].message.content)
+#         except Exception as e:
+#             return f"AI response error: {str(e)}"
+
+#     def _parse_groq_json(self, prompt_text: str, max_tok: int) -> Dict[str, Any]:
+#         """Helper: call Groq and parse JSON response robustly."""
+#         completion = self.groq_client.chat.completions.create(
+#             model="llama-3.1-8b-instant",
+#             messages=[{"role": "user", "content": prompt_text}],
+#             max_tokens=max_tok,
+#         )
+#         raw = str(completion.choices[0].message.content).strip()
+
+#         # strip markdown fences if present
+#         if "```" in raw:
+#             for part in raw.split("```"):
+#                 part = part.strip().lstrip("json").strip()
+#                 if part.startswith("{") or part.startswith("["):
+#                     raw = part
+#                     break
+
+#         # extract first complete JSON object
+#         start = raw.find("{")
+#         end   = raw.rfind("}") + 1
+#         if start != -1 and end > start:
+#             raw = raw[start:end]
+
+#         return json.loads(raw)
+
+#     def get_exam_details(self, exam_name: str, stream: str) -> Dict[str, Any]:
+
+#         # ── Call 1: exam metadata, coachings, websites, tips ─────────
+#         meta_prompt = (
+#             "You are an Indian entrance exam expert.\n\n"
+#             f"Return ONLY valid JSON for {exam_name} exam. No markdown, no extra text.\n\n"
+#             "{\n"
+#             f'  "exam_name": "{exam_name}",\n'
+#             f'  "full_form": "actual full form of {exam_name}",\n'
+#             f'  "conducting_body": "actual body that conducts {exam_name}",\n'
+#             f'  "eligibility": "actual eligibility for {exam_name}",\n'
+#             f'  "exam_pattern": "actual pattern of {exam_name} with sections, questions, marks, duration",\n'
+#             f'  "important_dates": "actual months when {exam_name} is held",\n'
+#             '  "useful_websites": [\n'
+#             f'    {{"name": "name", "url": "real url", "description": "what it offers for {exam_name}"}},\n'
+#             f'    {{"name": "name", "url": "real url", "description": "what it offers for {exam_name}"}},\n'
+#             f'    {{"name": "name", "url": "real url", "description": "what it offers for {exam_name}"}}\n'
+#             '  ],\n'
+#             '  "top_coachings": [\n'
+#             '    {\n'
+#             f'      "name": "real institute name for {exam_name}",\n'
+#             '      "cities": ["city1", "city2"],\n'
+#             '      "fees_1yr": "INR amount",\n'
+#             '      "fees_2yr": "INR amount",\n'
+#             '      "crash_course_fees": "INR amount",\n'
+#             '      "tenure_options": ["option1", "option2"],\n'
+#             '      "online_available": true,\n'
+#             '      "online_platform": "platform name",\n'
+#             '      "online_url": "real url",\n'
+#             '      "highlights": ["point1", "point2", "point3"],\n'
+#             '      "rating": "x.x",\n'
+#             '      "website": "real url"\n'
+#             '    },\n'
+#             '    {\n'
+#             f'      "name": "real institute name for {exam_name}",\n'
+#             '      "cities": ["city1", "city2"],\n'
+#             '      "fees_1yr": "INR amount",\n'
+#             '      "fees_2yr": "INR amount",\n'
+#             '      "crash_course_fees": "INR amount",\n'
+#             '      "tenure_options": ["option1", "option2"],\n'
+#             '      "online_available": true,\n'
+#             '      "online_platform": "platform name",\n'
+#             '      "online_url": "real url",\n'
+#             '      "highlights": ["point1", "point2", "point3"],\n'
+#             '      "rating": "x.x",\n'
+#             '      "website": "real url"\n'
+#             '    },\n'
+#             '    {\n'
+#             f'      "name": "real institute name for {exam_name}",\n'
+#             '      "cities": ["city1", "city2"],\n'
+#             '      "fees_1yr": "INR amount",\n'
+#             '      "fees_2yr": "INR amount",\n'
+#             '      "crash_course_fees": "INR amount",\n'
+#             '      "tenure_options": ["option1", "option2"],\n'
+#             '      "online_available": true,\n'
+#             '      "online_platform": "platform name",\n'
+#             '      "online_url": "real url",\n'
+#             '      "highlights": ["point1", "point2", "point3"],\n'
+#             '      "rating": "x.x",\n'
+#             '      "website": "real url"\n'
+#             '    },\n'
+#             '    {\n'
+#             f'      "name": "real institute name for {exam_name}",\n'
+#             '      "cities": ["city1", "city2"],\n'
+#             '      "fees_1yr": "INR amount",\n'
+#             '      "fees_2yr": "INR amount",\n'
+#             '      "crash_course_fees": "INR amount",\n'
+#             '      "tenure_options": ["option1", "option2"],\n'
+#             '      "online_available": true,\n'
+#             '      "online_platform": "platform name",\n'
+#             '      "online_url": "real url",\n'
+#             '      "highlights": ["point1", "point2", "point3"],\n'
+#             '      "rating": "x.x",\n'
+#             '      "website": "real url"\n'
+#             '    }\n'
+#             '  ],\n'
+#             '  "preparation_tips": [\n'
+#             f'    "specific tip 1 for {exam_name}",\n'
+#             f'    "specific tip 2 for {exam_name}",\n'
+#             f'    "specific tip 3 for {exam_name}",\n'
+#             f'    "specific tip 4 for {exam_name}",\n'
+#             f'    "specific tip 5 for {exam_name}"\n'
+#             '  ]\n'
+#             '}'
+#         )
+
+#         # ── Call 2: subjects syllabus + YouTube resources ─────────────
+#         syllabus_prompt = (
+#             "You are an Indian entrance exam expert.\n\n"
+#             f"Return ONLY valid JSON for the syllabus and YouTube resources of {exam_name} ({stream} stream).\n"
+#             "No markdown, no extra text. Only the JSON object below.\n\n"
+#             "{\n"
+#             '  "subjects": [\n'
+#             '    {\n'
+#             f'      "name": "first subject name in {exam_name}",\n'
+#             '      "color": "purple",\n'
+#             '      "topics": [\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]}\n'
+#             '      ]\n'
+#             '    },\n'
+#             '    {\n'
+#             f'      "name": "second subject name in {exam_name}",\n'
+#             '      "color": "teal",\n'
+#             '      "topics": [\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]}\n'
+#             '      ]\n'
+#             '    },\n'
+#             '    {\n'
+#             f'      "name": "third subject name in {exam_name}",\n'
+#             '      "color": "amber",\n'
+#             '      "topics": [\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]},\n'
+#             '        {"chapter": "chapter name", "concepts": ["concept1", "concept2", "concept3", "concept4"]}\n'
+#             '      ]\n'
+#             '    }\n'
+#             '  ],\n'
+#             '  "youtube_resources": [\n'
+#             '    {\n'
+#             '      "subject": "first subject name",\n'
+#             '      "channels": [\n'
+#             f'        {{"channel": "real channel name for {exam_name}", "playlist": "real playlist name", "url": "real youtube url", "subscribers": "count"}},\n'
+#             f'        {{"channel": "real channel name for {exam_name}", "playlist": "real playlist name", "url": "real youtube url", "subscribers": "count"}},\n'
+#             f'        {{"channel": "real channel name for {exam_name}", "playlist": "real playlist name", "url": "real youtube url", "subscribers": "count"}}\n'
+#             '      ]\n'
+#             '    },\n'
+#             '    {\n'
+#             '      "subject": "second subject name",\n'
+#             '      "channels": [\n'
+#             f'        {{"channel": "real channel name for {exam_name}", "playlist": "real playlist name", "url": "real youtube url", "subscribers": "count"}},\n'
+#             f'        {{"channel": "real channel name for {exam_name}", "playlist": "real playlist name", "url": "real youtube url", "subscribers": "count"}},\n'
+#             f'        {{"channel": "real channel name for {exam_name}", "playlist": "real playlist name", "url": "real youtube url", "subscribers": "count"}}\n'
+#             '      ]\n'
+#             '    },\n'
+#             '    {\n'
+#             '      "subject": "third subject name",\n'
+#             '      "channels": [\n'
+#             f'        {{"channel": "real channel name for {exam_name}", "playlist": "real playlist name", "url": "real youtube url", "subscribers": "count"}},\n'
+#             f'        {{"channel": "real channel name for {exam_name}", "playlist": "real playlist name", "url": "real youtube url", "subscribers": "count"}},\n'
+#             f'        {{"channel": "real channel name for {exam_name}", "playlist": "real playlist name", "url": "real youtube url", "subscribers": "count"}}\n'
+#             '      ]\n'
+#             '    }\n'
+#             '  ]\n'
+#             '}\n\n'
+#             "Rules:\n"
+#             f"- Replace ALL placeholder text with REAL {exam_name}-specific data\n"
+#             f"- Subject names must be ACTUAL subjects in {exam_name}\n"
+#             f"- Chapter names must be REAL chapters from the {exam_name} official syllabus\n"
+#             f"- YouTube channel names must be REAL channels known for {exam_name} preparation\n"
+#             "- colors must be one of: purple, teal, amber, coral, blue, pink"
+#         )
+
+#         try:
+#             meta = self._parse_groq_json(meta_prompt, 1800)
+#         except Exception as e:
+#             print(f"Meta call failed for {exam_name}: {e}")
+#             meta = {
+#                 "exam_name":        exam_name,
+#                 "full_form":        "",
+#                 "conducting_body":  "",
+#                 "eligibility":      "",
+#                 "exam_pattern":     "",
+#                 "important_dates":  "",
+#                 "useful_websites":  [],
+#                 "top_coachings":    [],
+#                 "preparation_tips": [],
+#                 "error":            str(e),
+#             }
+
+#         try:
+#             syllabus = self._parse_groq_json(syllabus_prompt, 2000)
+#         except Exception as e:
+#             print(f"Syllabus call failed for {exam_name}: {e}")
+#             syllabus = {"subjects": [], "youtube_resources": []}
+
+#         return {**meta, **syllabus}
+
+#     def get_nearby_coachings(self, exam: str, city: str, lat: float, lng: float) -> List[Dict[str, Any]]:
+#         """Groq-powered nearby coaching lookup. Replace with Google Places API in production."""
+#         location_hint = city if city else f"near coordinates {lat},{lng} in India"
+
+#         prompt = (
+#             f"List 5 real coaching institutes for {exam} in {location_hint}.\n"
+#             "Return ONLY a valid JSON array. No markdown, no extra text.\n\n"
+#             "[\n"
+#             "  {\n"
+#             '    "name": "real institute name",\n'
+#             '    "address": "full address",\n'
+#             '    "city": "city name",\n'
+#             '    "distance_km": 1.2,\n'
+#             '    "fees_per_year": "INR range",\n'
+#             '    "tenure_options": ["1 Year", "2 Year", "Crash Course"],\n'
+#             '    "online_available": true,\n'
+#             '    "phone": "real phone number",\n'
+#             '    "website": "real website url",\n'
+#             '    "maps_query": "institute name city",\n'
+#             '    "rating": "x.x",\n'
+#             '    "highlights": ["point1", "point2"]\n'
+#             "  }\n"
+#             "]\n\n"
+#             "Rules:\n"
+#             f"- All institutes must be REAL and actually present in {location_hint}\n"
+#             "- phone and website must be real\n"
+#             "- fees must be realistic INR amounts for 2024-25\n"
+#             "- Return ONLY the JSON array, nothing else"
+#         )
+
+#         try:
+#             completion = self.groq_client.chat.completions.create(
+#                 model="llama-3.1-8b-instant",
+#                 messages=[{"role": "user", "content": prompt}],
+#                 max_tokens=1200,
+#             )
+#             raw = str(completion.choices[0].message.content).strip()
+
+#             if "```" in raw:
+#                 for part in raw.split("```"):
+#                     part = part.strip().lstrip("json").strip()
+#                     if part.startswith("["):
+#                         raw = part
+#                         break
+
+#             start = raw.find("[")
+#             end   = raw.rfind("]") + 1
+#             if start != -1 and end > start:
+#                 raw = raw[start:end]
+
+#             return json.loads(raw)
+#         except Exception as e:
+#             print(f"Nearby coachings error: {e}")
+#             return []
+
+#     def recommend_by_cutoff(
+#         self,
+#         from_stream:  str,
+#         to_stream:    str,
+#         hsc_marks:    int,
+#         exam:         str,
+#         exam_marks:   float,
+#         city:         str,
+#         limit:        int,
+#         raw_colleges: List[Dict[str, Any]],
+#     ) -> List[Dict[str, Any]]:
+#         """
+#         Use Groq LLM to rank + annotate raw_colleges based on cutoffs and quotas,
+#         returning the top `limit` colleges the student most likely qualifies for.
+#         """
+#         city_hint = city if city else "any Maharashtra city (Pune, Nagpur, Nashik, Satara, Kolhapur)"
+
+#         college_list_text = "\n".join([
+#             f"{i+1}. {c.get('college_name', '?')} | {c.get('city', '?')} | "
+#             f"{c.get('course', '?')} | {c.get('ownership', '?')} | Facilities: {c.get('facilities', '')}"
+#             for i, c in enumerate(raw_colleges[:30])
+#         ])
+
+#         prompt = (
+#             "You are an Indian college admission expert for Maharashtra.\n\n"
+#             "Student profile:\n"
+#             f"- From: {from_stream} stream\n"
+#             f"- Target: {to_stream} stream\n"
+#             f"- HSC Marks: {hsc_marks}%\n"
+#             f"- Exam: {exam}\n"
+#             f"- {exam} Score/Percentile: {exam_marks}%\n"
+#             f"- Preferred city: {city_hint}\n\n"
+#             "Colleges in our database:\n"
+#             f"{college_list_text}\n\n"
+#             f"Task: From the list above, select the top {limit} colleges this student is most likely to get admission in.\n"
+#             "Consider:\n"
+#             f"1. Last year approximate cutoffs for {exam} in each college\n"
+#             "2. General, OBC, SC/ST quota eligibility\n"
+#             f"3. Match with the student's {to_stream} stream goal\n"
+#             f"4. City preference ({city_hint})\n\n"
+#             "Return ONLY valid JSON array (no markdown, no extra text):\n"
+#             "[\n"
+#             "  {\n"
+#             '    "college_name": "exact name from list",\n'
+#             '    "city": "city",\n'
+#             '    "course": "course name",\n'
+#             '    "ownership": "Govt/Private/Aided",\n'
+#             f'    "cutoff": "approximate {exam} cutoff last year e.g. 85 percentile or 120 marks",\n'
+#             '    "quota": "General / OBC / SC-ST (whichever the student likely qualifies under)",\n'
+#             '    "chance": "High / Moderate / Low — reason in 10 words",\n'
+#             '    "fees": "approximate annual fees INR",\n'
+#             '    "facilities": "facilities string from above",\n'
+#             '    "why_recommended": "one sentence reason",\n'
+#             '    "naac_grade": "if known",\n'
+#             '    "intake": "if known"\n'
+#             "  }\n"
+#             "]\n\n"
+#             f"Return exactly {limit} colleges maximum, sorted best match first."
+#         )
+
+#         try:
+#             completion = self.groq_client.chat.completions.create(
+#                 model="llama-3.1-8b-instant",
+#                 messages=[{"role": "user", "content": prompt}],
+#                 max_tokens=3000,
+#             )
+#             raw = str(completion.choices[0].message.content).strip()
+
+#             if "```" in raw:
+#                 for part in raw.split("```"):
+#                     part = part.strip().lstrip("json").strip()
+#                     if part.startswith("["):
+#                         raw = part
+#                         break
+
+#             start = raw.find("[")
+#             end   = raw.rfind("]") + 1
+#             if start != -1 and end > start:
+#                 raw = raw[start:end]
+
+#             return json.loads(raw)[:limit]
+#         except Exception as e:
+#             print(f"recommend_by_cutoff LLM error: {e}")
+#             # Graceful fallback: return raw colleges with minimal annotation
+#             return [
+#                 {**c, "chance": "Check cutoffs manually", "cutoff": "N/A", "quota": "General"}
+#                 for c in raw_colleges[:limit]
+#             ]
+
 from __future__ import annotations
 
 import os
 import json
 import torch
-import numpy as np
 from typing import List, Dict, Any, cast
 
 torch.set_num_threads(1)
@@ -1600,7 +2129,6 @@ torch.set_num_threads(1)
 import chromadb
 from chromadb import Collection
 from sentence_transformers import SentenceTransformer
-from rank_bm25 import BM25Okapi
 from groq import Groq
 
 
@@ -1612,32 +2140,21 @@ class SwitchSmartRAG:
         self.collection: Collection = self.client.get_collection("college_collection")
         print("✅ ChromaDB connected")
 
+        # Lighter model — 3x smaller than MiniLM-L6, nearly same quality
         self.embed_model: SentenceTransformer = SentenceTransformer(
-            "all-MiniLM-L6-v2", device="cpu"
+            "paraphrase-MiniLM-L3-v2", device="cpu"
         )
         print("✅ Embedding model loaded")
 
         self.groq_client: Groq = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
 
-        raw_data: Dict[str, Any] = cast(Dict[str, Any], self.collection.get())
+        # Limit to 500 records to save RAM
+        raw_data: Dict[str, Any] = cast(Dict[str, Any], self.collection.get(limit=500))
         metadatas_raw: Any = raw_data.get("metadatas") or []
         self.metadata: List[Dict[str, Any]] = [
             dict(m) for m in metadatas_raw if isinstance(m, dict)
         ]
-        print(f"✅ Loaded {len(self.metadata)} college records")
-
-        corpus: List[str] = [
-            " ".join([
-                str(m.get("college_name", "")),
-                str(m.get("course", "")),
-                str(m.get("city", "")),
-                str(m.get("facilities", "")),
-            ])
-            for m in self.metadata
-        ]
-        tokenized: List[List[str]] = [doc.lower().split() for doc in corpus]
-        self.bm25: BM25Okapi = BM25Okapi(tokenized)
-        print("✅ BM25 index built — RAG ready")
+        print(f"✅ Loaded {len(self.metadata)} college records — RAG ready")
 
     def retrieve(
         self,
@@ -1665,19 +2182,11 @@ class SwitchSmartRAG:
         )
 
         metadatas_field: Any = query_result.get("metadatas") or [[]]
-        semantic_results: List[Dict[str, Any]] = [
+        combined: List[Dict[str, Any]] = [
             dict(m)
             for m in (metadatas_field[0] if metadatas_field else [])
             if isinstance(m, dict)
         ]
-
-        scores: np.ndarray = self.bm25.get_scores(query.lower().split())
-        top_idx = np.argsort(scores)[::-1][:n]
-        keyword_results: List[Dict[str, Any]] = [
-            self.metadata[int(i)] for i in top_idx
-        ]
-
-        combined = semantic_results + keyword_results
 
         unique: Dict[str, Dict[str, Any]] = {}
         for idx, c in enumerate(combined):
@@ -1688,7 +2197,7 @@ class SwitchSmartRAG:
         filtered: List[Dict[str, Any]] = []
 
         for c in unique.values():
-            c_city = str(c.get("city", "")).lower()
+            c_city   = str(c.get("city", "")).lower()
             c_course = str(c.get("course", "")).lower()
 
             if city and city.lower() not in c_city:
@@ -1974,7 +2483,7 @@ class SwitchSmartRAG:
         return {**meta, **syllabus}
 
     def get_nearby_coachings(self, exam: str, city: str, lat: float, lng: float) -> List[Dict[str, Any]]:
-        """Groq-powered nearby coaching lookup. Replace with Google Places API in production."""
+        """Groq-powered nearby coaching lookup."""
         location_hint = city if city else f"near coordinates {lat},{lng} in India"
 
         prompt = (
@@ -2111,7 +2620,6 @@ class SwitchSmartRAG:
             return json.loads(raw)[:limit]
         except Exception as e:
             print(f"recommend_by_cutoff LLM error: {e}")
-            # Graceful fallback: return raw colleges with minimal annotation
             return [
                 {**c, "chance": "Check cutoffs manually", "cutoff": "N/A", "quota": "General"}
                 for c in raw_colleges[:limit]
