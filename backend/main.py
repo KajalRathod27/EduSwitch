@@ -842,24 +842,24 @@ def nearby_coachings(
 @app.get("/analytics")
 def analytics() -> Dict[str, Any]:
     try:
-        rag      = get_rag()
-        raw_data = cast(Dict[str, Any], rag.collection.get())
-        raw: List[Dict[str, Any]] = [
-            dict(m) for m in (raw_data.get("metadatas") or [])
-            if isinstance(m, dict)
-        ]
-        cities:  Dict[str, int] = {}
-        streams: Dict[str, int] = {}
-        for d in raw:
-            c = str(d.get("city",   "Unknown"))
-            s = str(d.get("course", "Unknown")).split()[0]
-            cities[c]  = cities.get(c,  0) + 1
-            streams[s] = streams.get(s, 0) + 1
-        return {"total": len(raw), "by_city": cities, "by_stream": streams}
+        import pandas as pd
+
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(BASE_DIR, "../data/final_merged_all_cities.csv")
+
+        df = pd.read_csv(csv_path)
+
+        cities  = df["City"].value_counts().to_dict()
+        streams = df["Stream"].value_counts().to_dict()
+
+        return {
+            "total":     len(df),
+            "by_city":   cities,
+            "by_stream": streams,
+        }
     except Exception as e:
         print(f"Analytics error: {e}")
         return {"error": str(e), "total": 0, "by_city": {}, "by_stream": {}}
-
 
 @app.get("/recommend-colleges")
 def recommend_colleges(

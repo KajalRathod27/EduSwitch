@@ -120,6 +120,36 @@
 
 // export default App
 
+// import { useState } from "react"
+// import Sidebar from "./components/Sidebar"
+// import ChatAdvisor from "./components/ChatAdvisor"
+// import CollegeSearch from "./components/CollegeSearch"
+// import CareerPredictor from "./components/CareerPredictor"
+// import EntranceExams from "./components/EntranceExams"
+// import Analytics from "./components/Analytics"
+// import "./index.css"
+
+// export default function App() {
+//   const [page, setPage] = useState("advisor")
+
+//   const pages = {
+//     advisor:   <ChatAdvisor />,
+//     search:    <CollegeSearch />,
+//     predict:   <CareerPredictor />,
+//     exams:     <EntranceExams />,
+//     analytics: <Analytics />,
+//   }
+
+//   return (
+//     <div style={{ display: "flex", minHeight: "100vh" }}>
+//       <Sidebar active={page} setActive={setPage} />
+//       <main style={{ flex: 1, overflowY: "auto" }}>
+//         {pages[page]}
+//       </main>
+//     </div>
+//   )
+// }
+
 import { useState } from "react"
 import Sidebar from "./components/Sidebar"
 import ChatAdvisor from "./components/ChatAdvisor"
@@ -131,6 +161,7 @@ import "./index.css"
 
 export default function App() {
   const [page, setPage] = useState("advisor")
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const pages = {
     advisor:   <ChatAdvisor />,
@@ -140,12 +171,92 @@ export default function App() {
     analytics: <Analytics />,
   }
 
+  const pageLabels = {
+    advisor: "AI Advisor", search: "College Search",
+    predict: "Career Predictor", exams: "Entrance Exams", analytics: "Analytics",
+  }
+
+  function navigate(id) {
+    setPage(id)
+    setSidebarOpen(false)
+  }
+
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      <Sidebar active={page} setActive={setPage} />
-      <main style={{ flex: 1, overflowY: "auto" }}>
-        {pages[page]}
+    <div style={{ display: "flex", minHeight: "100vh", position: "relative" }}>
+
+      {/* Mobile overlay */}
+      <div
+        className={`mobile-overlay${sidebarOpen ? " open" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+      />
+
+      {/* Sidebar — hidden on mobile unless open */}
+      <div style={{
+        position: "fixed", top: 0, left: 0, height: "100vh", zIndex: 100,
+        transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
+        transition: "transform 0.25s ease",
+        display: "block",
+      }}
+        className="sidebar-mobile"
+      >
+        <Sidebar active={page} setActive={navigate} />
+      </div>
+
+      {/* Desktop sidebar — always visible on large screens */}
+      <div style={{ display: "none" }} className="sidebar-desktop">
+        <Sidebar active={page} setActive={navigate} />
+      </div>
+
+      {/* Main content */}
+      <main style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+
+        {/* Mobile top bar */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 12,
+          padding: "12px 16px",
+          background: "var(--bg2)",
+          borderBottom: "1px solid var(--border)",
+          position: "sticky", top: 0, zIndex: 50,
+        }}
+          className="mobile-topbar"
+        >
+          <button
+            onClick={() => setSidebarOpen(true)}
+            style={{
+              background: "var(--surface)", border: "1px solid var(--border)",
+              borderRadius: 8, padding: "6px 10px", cursor: "pointer",
+              color: "var(--text)", fontSize: 18, lineHeight: 1,
+              display: "flex", alignItems: "center",
+            }}
+          >
+            ☰
+          </button>
+          <span style={{ fontFamily: "Syne, sans-serif", fontSize: 16, color: "#a89cff", fontWeight: 700 }}>
+            EduSwitch
+          </span>
+          <span style={{ fontSize: 13, color: "var(--muted)", marginLeft: 4 }}>
+            · {pageLabels[page]}
+          </span>
+        </div>
+
+        {/* Page content */}
+        <div style={{ flex: 1 }}>
+          {pages[page]}
+        </div>
       </main>
+
+      <style>{`
+        @media (min-width: 769px) {
+          .sidebar-mobile { display: none !important; }
+          .sidebar-desktop { display: block !important; position: sticky; top: 0; height: 100vh; flex-shrink: 0; }
+          .mobile-topbar { display: none !important; }
+          main { margin-left: 0; }
+        }
+        @media (max-width: 768px) {
+          .sidebar-desktop { display: none !important; }
+          .sidebar-mobile { display: block !important; }
+        }
+      `}</style>
     </div>
   )
 }
