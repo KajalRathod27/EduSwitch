@@ -914,3 +914,9 @@ def debug():
         return {"rag": "ok", "records": len(rag.metadata), "groq_key_set": bool(os.getenv("GROQ_API_KEY"))}
     except Exception as e:
         return {"rag": "FAILED", "error": str(e), "trace": traceback.format_exc()}
+
+@app.on_event("startup")
+async def startup_event():
+    print("🚀 Pre-loading RAG on startup...")
+    get_rag()
+    print("✅ RAG pre-loaded")
