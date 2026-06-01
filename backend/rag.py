@@ -1607,7 +1607,8 @@ from groq import Groq
 class SwitchSmartRAG:
 
     def __init__(self) -> None:
-        self.client: Any = chromadb.PersistentClient(path="./chroma_db")
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        self.client: Any = chromadb.PersistentClient(path=os.path.join(BASE_DIR, "chroma_db"))
         self.collection: Collection = self.client.get_collection("college_collection")
         print("✅ ChromaDB connected")
 

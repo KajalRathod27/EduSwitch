@@ -905,3 +905,12 @@ def recommend_colleges(
     except Exception as e:
         print(f"Recommend colleges error: {e}")
         return {"colleges": [], "error": str(e)}
+
+@app.get("/debug")
+def debug():
+    import traceback
+    try:
+        rag = get_rag()
+        return {"rag": "ok", "records": len(rag.metadata), "groq_key_set": bool(os.getenv("GROQ_API_KEY"))}
+    except Exception as e:
+        return {"rag": "FAILED", "error": str(e), "trace": traceback.format_exc()}
